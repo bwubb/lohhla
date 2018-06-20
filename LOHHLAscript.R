@@ -18,7 +18,7 @@ option_list = list(
               help="location of all BAMs to test", metavar="character"),
   make_option(c("-hla", "--hlaPath"), type="character", default=NULL, 
               help="location to patient HLA calls", metavar="character"),
-  make_option(c("-hlaLoc", "--HLAfastaLoc"), type="character", default='~/lohhla/data/hla_all.fasta', 
+  make_option(c("-hlaLoc", "--HLAfastaLoc"), type="character", default='~softare/lohhla/data/hla_all.fasta', 
               help="location of HLA FASTA [default= %default]", metavar="character"),
   make_option(c("-cn", "--CopyNumLoc"), type="character", default="FALSE", 
               help="location to patient purity and ploidy output\n\t\tcan be FALSE to only estimate allelic imbalance", metavar="character"),
@@ -120,8 +120,8 @@ if(interactive)
 {
   # if you wish to run script interactively, then alter parameters below
   opt<-parse_args(opt_parser,c('--patientId', 'G_K107'
-                               , '--outputDir', '/camp/lab/swantonc/working/mcgrann/projects/LOHproject/kidney_run/G_K107_full/'
-                               , '--normalBAMfile', '/camp/project/tracerX/working/CRENAL/OUTPUT/G_K107/Rabbit_Hole_Exome/MERGED/DE_DUPED/N1d1ex1.bam'
+                               , '--outputDir', 'lohhla/out'
+                               , '--normalBAMfile', 'bam_input/work/{{normal}}/hg38/ready.bam'
                                , '--BAMDir', '/camp/project/tracerX/working/CRENAL/OUTPUT/G_K107/Rabbit_Hole_Exome/MERGED/DE_DUPED/'
                                , '--hlaPath', '/camp/project/tracerX/working/CRENAL/OUTPUT/G_K107/Rabbit_Hole_Exome/MERGED/POLYSOLVER/HLA_Type/winners.hla.txt'
                                , '--HLAfastaLoc', '/farm/home/lr-tct-lif/wilson52/installs/polysolver/data/abc_complete.fasta'
@@ -249,7 +249,7 @@ get.partially.matching.reads <- function(workDir, regionDir, BAMDir, BAMfile){
   # convert to fastq
   cmd <- paste('java -jar ', GATKDir, '/SamToFastq.jar I=', regionDir, '/fished.sam F=', regionDir, '/fished.1.fastq F2=', regionDir, '/fished.2.fastq VALIDATION_STRINGENCY=SILENT', sep = '')
   system(cmd)
-
+#HLAx fastq is not a pair
 }
 
 combine.fastqs <- function(chr6.f1, chr6.f2, fished.f1, fished.f2){
@@ -501,6 +501,7 @@ if(length(BAMfiles)<2)
 
 regions   <- sapply(BAMfiles, FUN =function(x) {return(unlist(strsplit(x, split = '.bam'))[1])})
 
+#hlaAllele
 hlaAlleles <- read.table(hlaPath, sep = '\t', header = FALSE, as.is = TRUE)
 if(ncol(hlaAlleles) == 3){
   hlaAlleles <- unique(sort(c(hlaAlleles$V2, hlaAlleles$V3)))
@@ -553,12 +554,19 @@ if(mapping.step){
   write.table(paste('\ngenerate patient reference fasta at ', date(), '\n', sep = ''), file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
   patient.hlaFasta <- hlaFasta[hlaAlleles]
   write.fasta(patient.hlaFasta, file = paste(workDir, '/', full.patient, '.patient.hlaFasta.fa', sep = ''), names = names(patient.hlaFasta))
-
+  #OK THIS STEP was just determining which alleles we are looking for in the patient and taking a fasta subset from the provided HLA_ref.fa
+  
+  
   # nix file for patient reference fasta -- novoalign
   write.table(paste('\nnix file for patient reference fasta at ', date(), '\n', sep = ''), file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
-  novoindexCMD <- paste('novoindex ', workDir, '/', full.patient, '.patient.hlaFasta.nix', ' ', workDir, '/', full.patient, '.patient.hlaFasta.fa', sep = '')
-  write.table(novoindexCMD, file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
-  system(novoindexCMD)
+  #novoindexCMD <- paste('novoindex ', workDir, '/', full.patient, '.patient.hlaFasta.nix', ' ', workDir, '/', full.patient, '.patient.hlaFasta.fa', sep = '')
+  #write.table(novoindexCMD, file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
+  
+  #“bbmap.sh in=reads.fq ref=A.fa nodisk” will generate an index in memory and write nothing to disk.
+  #Otherwise it will make the index at dir(A.fa)/ref. This could be fine with clean up.
+  bbmapindexCMD <- paste('bbmap.sh ','ref=',workDir, '/', full.patient, '.patient.hlaFasta.fa', sep = '')
+  write.table(bbmapindexCMD, file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
+  system(bbmapindexCMD)
 
   if(fishing.step){
     write.table(paste('\ncreate kmer file at ', date(), '\n', sep = ''), file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
@@ -584,6 +592,12 @@ if(mapping.step){
     #extract HLA possible reads from BAM file
     write.table(paste('\nextract HLA possible reads from BAM file at ', date(), '\n', sep = ''), file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
 
+#from HLAx
+#echo "Extracting reads from S3"
+#samtools view -u $S3 chr6:29886751-33090696 | samtools view -L $BIN/../data/hla.bed - > ${TEMP}.sam
+#$BIN/preprocess.pl ${TEMP}.sam | gzip > $OUT/$ID.fq.gz
+# ^
+#This appears to do the same thing as whatit wants. 
     # chr 6 and contigs
     samtoolsCMD <- paste("samtools view -H ", BAMDir, '/', BAMfile, " > " , regionDir,"/",BAMid,".chr6region.sam",sep="")
     write.table(samtoolsCMD, file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
@@ -661,10 +675,15 @@ if(mapping.step){
     # align to all HLA alleles
     write.table(paste('\nalign to all HLA alleles at ', date(), '\n', sep = ''), file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)  
     
+    #-F STDFQ Fastq format with Sanger coding of quality values. -10log base10 (Perr) + '!'
+    #-o FullNW turns off soft clipping
+    #-R 0 -r All 9999 Specifies a score difference between first two alignments for reporting repeats. If the difference is less than this then the read is treated as
+    #-r ALL All alignment locations are reported. The 'All' method can optionally specify a limit for the number of lines reported. e.g. '­r A 10' will report at most 10 randomly selected alignments
     alignCMD <- paste(NOVODir, '/novoalign -d ', workDir, '/', full.patient, '.patient.hlaFasta.nix', ' -f ', regionDir,"/",BAMid,".chr6region.1.fastq", ' ', regionDir,"/",BAMid,".chr6region.2.fastq", ' -F STDFQ -R 0 -r All 9999 -o SAM -o FullNW 1> ', regionDir, '/', BAMid, '.chr6region.patient.reference.hlas.sam ', '2> ', regionDir, '/', BAMid, '_BS_GL.chr6region.patient.reference.hlas.metrics', sep = '')
     write.table(alignCMD, file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
     system(alignCMD)
-
+    #bbmap command, no local
+    
     convertToBam <- paste("samtools view -bS -o ",regionDir, '/', BAMid, '.chr6region.patient.reference.hlas.bam'," ",regionDir, '/', BAMid, '.chr6region.patient.reference.hlas.sam' , sep="")
     write.table(convertToBam, file = log.name, quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
     system(convertToBam)
@@ -830,7 +849,7 @@ for (region in regions)
         system(cmd)
       }
 
-      HLA_As            <- grep(HLA_gene,hlaAlleles,value=TRUE)
+      HLA_As <- grep(HLA_gene,hlaAlleles,value=TRUE)
       if(length(HLA_As)<=1)
       {
         next
